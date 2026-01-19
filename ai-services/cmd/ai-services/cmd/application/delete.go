@@ -38,10 +38,10 @@ Arguments
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		// podman connectivity
-		runtimeClient, err := podman.NewPodmanClient()
+		// Get runtime from factory
+		runtimeClient, err := cmd.RuntimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		err = deleteApplication(runtimeClient, applicationName)
@@ -59,7 +59,7 @@ func init() {
 	deleteCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 }
 
-func deleteApplication(client *podman.PodmanClient, appName string) error {
+func deleteApplication(client runtime.Runtime, appName string) error {
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
 	appExists := dirExists(appDir)
 
@@ -137,7 +137,7 @@ func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error
 	return confirmDelete, nil
 }
 
-func podsDeletion(client *podman.PodmanClient, pods []runtime.Pod) error {
+func podsDeletion(client runtime.Runtime, pods []runtime.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {

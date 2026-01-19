@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -44,9 +44,10 @@ Note: Logs are streamed only when a single pod is specified, and only after the 
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		runtimeClient, err := podman.NewPodmanClient()
+		// Get runtime from factory
+		runtimeClient, err := cmd.RuntimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		return startApplication(runtimeClient, applicationName, startPodNames)
@@ -60,7 +61,7 @@ func init() {
 }
 
 // startApplication starts all pods associated with the given application name.
-func startApplication(client *podman.PodmanClient, appName string, podNames []string) error {
+func startApplication(client runtime.Runtime, appName string, podNames []string) error {
 	pods, err := fetchPodsFromRuntime(client, appName)
 	if err != nil {
 		return err
@@ -96,7 +97,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 	return nil
 }
 
-func confirmAndStartPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func confirmAndStartPods(client runtime.Runtime, podsToStart []runtime.Pod) error {
 	logPodsToStart(podsToStart)
 	printLogs := shouldPrintLogs(podsToStart)
 
@@ -146,7 +147,7 @@ func shouldPrintLogs(podsToStart []runtime.Pod) bool {
 	return true
 }
 
-func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {
+func fetchPodsFromRuntime(client runtime.Runtime, appName string) ([]runtime.Pod, error) {
 	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -157,7 +158,7 @@ func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtim
 	return pods, err
 }
 
-func fetchPodsToStart(client *podman.PodmanClient, pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
+func fetchPodsToStart(client runtime.Runtime, pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
 	if len(podNames) > 0 {
 		return filterPodsByName(pods, podNames)
 	}
@@ -166,7 +167,7 @@ func fetchPodsToStart(client *podman.PodmanClient, pods []runtime.Pod, podNames 
 	return filterPodsByAnnotation(client, pods)
 }
 
-func startPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func startPods(client runtime.Runtime, podsToStart []runtime.Pod) error {
 	var errors []string
 	for _, pod := range podsToStart {
 		logger.Infof("Starting the pod: %s\n", pod.Name)
@@ -200,7 +201,7 @@ func startPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
 	return nil
 }
 
-func printPodLogs(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func printPodLogs(client runtime.Runtime, podsToStart []runtime.Pod) error {
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
 	if err := client.PodLogs(podsToStart[0].Name); err != nil {
@@ -243,7 +244,7 @@ func filterPodsByName(pods []runtime.Pod, podNames []string) ([]runtime.Pod, err
 	return podsToStart, nil
 }
 
-func filterPodsByAnnotation(client *podman.PodmanClient, pods []runtime.Pod) ([]runtime.Pod, error) {
+func filterPodsByAnnotation(client runtime.Runtime, pods []runtime.Pod) ([]runtime.Pod, error) {
 	var podsToStart []runtime.Pod
 
 outerloop:

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -39,9 +39,10 @@ Arguments
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		runtimeClient, err := podman.NewPodmanClient()
+		// Get runtime from factory
+		runtimeClient, err := cmd.RuntimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		return stopApplication(runtimeClient, applicationName, stopPodNames)
@@ -54,7 +55,7 @@ func init() {
 }
 
 // stopApplication stops all pods associated with the given application name.
-func stopApplication(client *podman.PodmanClient, appName string, podNames []string) error {
+func stopApplication(client runtime.Runtime, appName string, podNames []string) error {
 	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -142,7 +143,7 @@ func fetchPodsToStop(pods []runtime.Pod, podNames []string, appName string) ([]r
 	return podsToStop, nil
 }
 
-func stopPods(client *podman.PodmanClient, podsToStop []runtime.Pod) error {
+func stopPods(client runtime.Runtime, podsToStop []runtime.Pod) error {
 	var errors []string
 	for _, pod := range podsToStop {
 		logger.Infof("Stopping the pod: %s\n", pod.Name)

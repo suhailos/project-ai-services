@@ -252,3 +252,8 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
 }
+
+// Type returns the runtime type for PodmanClient
+func (pc *PodmanClient) Type() runtime.RuntimeType {
+	return runtime.RuntimeTypePodman
+}

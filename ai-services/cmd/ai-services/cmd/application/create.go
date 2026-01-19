@@ -120,10 +120,10 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
-		// podman connectivity
-		runtime, err := podman.NewPodmanClient()
+		// Get runtime from factory
+		runtimeClient, err := cmd.RuntimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		// Proceed to create application
@@ -169,7 +169,7 @@ var createCmd = &cobra.Command{
 			3. Else, skip existing pods, and create missing pods
 		*/
 
-		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
+		existingPods, err := helpers.CheckExistingPodsForApplication(runtimeClient, appName)
 		if err != nil {
 			return fmt.Errorf("failed while checking existing pods for application: %w", err)
 		}
@@ -184,7 +184,7 @@ var createCmd = &cobra.Command{
 		// ---- Validate Spyre card Requirements ----
 
 		// calculate the required spyre cards of only those pods which are not deployed yet
-		reqSpyreCardsCount, err := calculateReqSpyreCards(runtime, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
+		reqSpyreCardsCount, err := calculateReqSpyreCards(runtimeClient, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 		if err != nil {
 			return fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
 		}
@@ -205,7 +205,7 @@ var createCmd = &cobra.Command{
 		}
 
 		// ---- Download Container Images ----
-		if err := downloadImagesForTemplate(runtime, templateName, appName); err != nil {
+		if err := downloadImagesForTemplate(runtimeClient, templateName, appName); err != nil {
 			return err
 		}
 
@@ -242,7 +242,7 @@ var createCmd = &cobra.Command{
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
-		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
+		if err := executePodTemplates(runtimeClient, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
 			return err
 		}
 		s.Stop("Application '" + appName + "' deployed successfully")
@@ -250,7 +250,7 @@ var createCmd = &cobra.Command{
 		logger.Infoln("-------")
 
 		// print the next steps to be performed at the end of create
-		if err := helpers.PrintNextSteps(runtime, appName, templateName); err != nil {
+		if err := helpers.PrintNextSteps(runtimeClient, appName, templateName); err != nil {
 			// do not want to fail the overall create if we cannot print next steps
 			logger.Infof("failed to display next steps: %v\n", err)
 
@@ -677,7 +677,7 @@ func validateSpyreCardRequirements(req int, actual int) error {
 	return nil
 }
 
-func calculateReqSpyreCards(client *podman.PodmanClient, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
+func calculateReqSpyreCards(client runtime.Runtime, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts

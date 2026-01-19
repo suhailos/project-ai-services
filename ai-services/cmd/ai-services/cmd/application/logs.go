@@ -3,8 +3,9 @@ package application
 import (
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -28,9 +29,10 @@ var logsCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		runtimeClient, err := podman.NewPodmanClient()
+		// Get runtime from factory
+		runtimeClient, err := cmd.RuntimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		return showLogs(runtimeClient, podName, containerNameOrID)
@@ -43,7 +45,7 @@ func init() {
 	_ = logsCmd.MarkFlagRequired("pod")
 }
 
-func showLogs(client *podman.PodmanClient, podName string, containerNameOrID string) error {
+func showLogs(client runtime.Runtime, podName string, containerNameOrID string) error {
 	logger.Warningln("Press Ctrl+C to exit the logs and return to the terminal.")
 	logger.Infof("Fetching logs for application pod: %s", podName)
 
@@ -62,7 +64,7 @@ func showLogs(client *podman.PodmanClient, podName string, containerNameOrID str
 	return nil
 }
 
-func fetchContainerLogs(client *podman.PodmanClient, containerNameOrID string) error {
+func fetchContainerLogs(client runtime.Runtime, containerNameOrID string) error {
 	exists, err := client.ContainerExists(containerNameOrID)
 	if err != nil {
 		return err
