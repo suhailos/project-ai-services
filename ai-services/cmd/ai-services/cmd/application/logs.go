@@ -3,8 +3,7 @@ package application
 import (
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	"github.com/spf13/cobra"
 )
 
@@ -28,13 +27,20 @@ var logsCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		factory := runtime.NewFactoryFromEnv()
-		runtimeClient, err := factory.Create()
+		// Create application instance using factory
+		factory := application.NewFactoryFromEnv()
+		app, err := factory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to create runtime client: %w", err)
+			return fmt.Errorf("failed to create application instance: %w", err)
 		}
 
-		return showLogs(runtimeClient, podName, containerNameOrID)
+		// Call the Logs method with options
+		opts := application.LogsOptions{
+			PodName:           podName,
+			ContainerNameOrID: containerNameOrID,
+		}
+
+		return app.Logs(opts)
 	},
 }
 
@@ -42,40 +48,4 @@ func init() {
 	logsCmd.Flags().StringVar(&podName, "pod", "", "Pod name to show logs from (required)")
 	logsCmd.Flags().StringVar(&containerNameOrID, "container", "", "Container logs to show logs from (Optional)")
 	_ = logsCmd.MarkFlagRequired("pod")
-}
-
-func showLogs(client runtime.Runtime, podName string, containerNameOrID string) error {
-	logger.Warningln("Press Ctrl+C to exit the logs and return to the terminal.")
-	logger.Infof("Fetching logs for application pod: %s", podName)
-
-	if containerNameOrID == "" {
-		if err := client.PodLogs(podName); err != nil {
-			return fmt.Errorf("failed to fetch pod: %s logs; err: %w", podName, err)
-		}
-
-		return nil
-	}
-
-	if err := fetchContainerLogs(client, containerNameOrID); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func fetchContainerLogs(client runtime.Runtime, containerNameOrID string) error {
-	exists, err := client.ContainerExists(containerNameOrID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("container %s doesn't exists", containerNameOrID)
-	}
-	logger.Infof("Fetching logs for container: %s", containerNameOrID)
-	err = client.ContainerLogs(containerNameOrID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch container: %s logs; err: %w", containerNameOrID, err)
-	}
-
-	return nil
 }
