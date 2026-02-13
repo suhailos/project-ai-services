@@ -7,7 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -26,9 +26,10 @@ var infoCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		runtimeClient, err := podman.NewPodmanClient()
+		factory := runtime.NewFactoryFromEnv()
+		runtimeClient, err := factory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		err = runInfoCommamd(runtimeClient, applicationName)
@@ -40,7 +41,7 @@ var infoCmd = &cobra.Command{
 	},
 }
 
-func runInfoCommamd(client *podman.PodmanClient, appName string) error {
+func runInfoCommamd(client runtime.Runtime, appName string) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}

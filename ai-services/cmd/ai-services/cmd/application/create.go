@@ -25,7 +25,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -128,10 +127,11 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
-		// podman connectivity
-		runtime, err := podman.NewPodmanClient()
+		// runtime connectivity
+		runtimeFactory := runtime.NewFactoryFromEnv()
+		runtimeClient, err := runtimeFactory.Create()
 		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
+			return fmt.Errorf("failed to create runtime client: %w", err)
 		}
 
 		// Proceed to create application
@@ -177,7 +177,7 @@ var createCmd = &cobra.Command{
 			3. Else, skip existing pods, and create missing pods
 		*/
 
-		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
+		existingPods, err := helpers.CheckExistingPodsForApplication(runtimeClient, appName)
 		if err != nil {
 			return fmt.Errorf("failed while checking existing pods for application: %w", err)
 		}
@@ -192,7 +192,7 @@ var createCmd = &cobra.Command{
 		// ---- Validate Spyre card Requirements ----
 
 		// calculate the required spyre cards of only those pods which are not deployed yet
-		reqSpyreCardsCount, err := calculateReqSpyreCards(runtime, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
+		reqSpyreCardsCount, err := calculateReqSpyreCards(runtimeClient, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 		if err != nil {
 			return fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
 		}
@@ -213,7 +213,7 @@ var createCmd = &cobra.Command{
 		}
 
 		// ---- Download Container Images ----
-		if err := downloadImagesForTemplate(runtime, templateName, appName); err != nil {
+		if err := downloadImagesForTemplate(runtimeClient, templateName, appName); err != nil {
 			return err
 		}
 
@@ -250,7 +250,7 @@ var createCmd = &cobra.Command{
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
-		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
+		if err := executePodTemplates(runtimeClient, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
 			return err
 		}
 		s.Stop("Application '" + appName + "' deployed successfully")
@@ -258,7 +258,7 @@ var createCmd = &cobra.Command{
 		logger.Infoln("-------")
 
 		// print the next steps to be performed at the end of create
-		if err := helpers.PrintNextSteps(runtime, appName, templateName); err != nil {
+		if err := helpers.PrintNextSteps(runtimeClient, appName, templateName); err != nil {
 			// do not want to fail the overall create if we cannot print next steps
 			logger.Infof("failed to display next steps: %v\n", err)
 
@@ -269,7 +269,7 @@ var createCmd = &cobra.Command{
 	},
 }
 
-func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName string) error {
+func downloadImagesForTemplate(runtimeClient runtime.Runtime, templateName, appName string) error {
 	/// Deprecated: if skipImageDownload is passed, then consider it
 	if skipImageDownload {
 		// if skipImageDownload flag is set, then override the image pull policy to Never
@@ -277,7 +277,7 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 	}
 
 	// create a new imagePull object based on imagePullPolicy
-	imagePull := image.NewImagePull(runtime, imagePullPolicy, appName, templateName)
+	imagePull := image.NewImagePull(runtimeClient, imagePullPolicy, appName, templateName)
 
 	// based on the imagePullPolicy set, download the images
 	return imagePull.Run()
@@ -484,7 +484,7 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 	return nil
 }
 
-func executePodTemplateLayer(runtime runtime.Runtime, tp templates.Template, tmpls map[string]*template.Template,
+func executePodTemplateLayer(runtimeClient runtime.Runtime, tp templates.Template, tmpls map[string]*template.Template,
 	globalParams map[string]any, pciAddresses []string, existingPods []string, podTemplateName, appName string) error {
 	logger.Infof("'%s': Processing template...\n", podTemplateName)
 
@@ -524,14 +524,14 @@ func executePodTemplateLayer(runtime runtime.Runtime, tp templates.Template, tmp
 	reader := bytes.NewReader(rendered.Bytes())
 
 	// Deploy the Pod and do Readiness check
-	if err := deployPodAndReadinessCheck(runtime, podSpec, podTemplateName, reader, constructPodDeployOptions(podAnnotations)); err != nil {
+	if err := deployPodAndReadinessCheck(runtimeClient, podSpec, podTemplateName, reader, constructPodDeployOptions(podAnnotations)); err != nil {
 		return fmt.Errorf("'%s': Failed to deploy pod and do readiness check: %w", podTemplateName, err)
 	}
 
 	return nil
 }
 
-func executePodTemplates(runtime runtime.Runtime, tp templates.Template,
+func executePodTemplates(runtimeClient runtime.Runtime, tp templates.Template,
 	appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
 	globalParams := map[string]any{
@@ -556,7 +556,7 @@ func executePodTemplates(runtime runtime.Runtime, tp templates.Template,
 			wg.Add(1)
 			go func(t string) {
 				defer wg.Done()
-				if err := executePodTemplateLayer(runtime, tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName); err != nil {
+				if err := executePodTemplateLayer(runtimeClient, tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName); err != nil {
 					errCh <- err
 				}
 			}(podTemplateName)
@@ -582,14 +582,14 @@ func executePodTemplates(runtime runtime.Runtime, tp templates.Template,
 	return nil
 }
 
-func doContainersCreationCheck(runtime runtime.Runtime, podSpec *models.PodSpec, podTemplateName, podName, podID string) error {
+func doContainersCreationCheck(runtimeClient runtime.Runtime, podSpec *models.PodSpec, podTemplateName, podName, podID string) error {
 	logger.Infof("'%s', '%s': Performing Containers Creation check for pod...\n", podTemplateName, podName)
 
 	expectedContainerCount := len(specs.FetchContainerNames(*podSpec))
 
 	logger.Infof("'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
 	// wait for all containers for a given pod are created
-	if err := helpers.WaitForContainersCreation(runtime, podID, expectedContainerCount, containerCreationTimeout); err != nil {
+	if err := helpers.WaitForContainersCreation(runtimeClient, podID, expectedContainerCount, containerCreationTimeout); err != nil {
 		return fmt.Errorf("containers creation check failed for pod: '%s' with error: %w", podName, err)
 	}
 
@@ -598,8 +598,8 @@ func doContainersCreationCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
 	return nil
 }
 
-func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName, containerID string) error {
-	cInfo, err := runtime.InspectContainer(containerID)
+func doContainerReadinessCheck(runtimeClient runtime.Runtime, podTemplateName, podName, containerID string) error {
+	cInfo, err := runtimeClient.InspectContainer(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
 	}
@@ -607,7 +607,7 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName
 	logger.Infof("'%s', '%s', '%s': Performing Container Readiness check...\n", podTemplateName, podName, cInfo.Name)
 
 	// getting the Start Period set for a container
-	startPeriod, err := helpers.FetchContainerStartPeriod(runtime, containerID)
+	startPeriod, err := helpers.FetchContainerStartPeriod(runtimeClient, containerID)
 	if err != nil {
 		return fmt.Errorf("fetching container: '%s' start period failed: %w", cInfo.Name, err)
 	}
@@ -623,7 +623,7 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName
 
 	logger.Infof("'%s', '%s', '%s': Waiting for Container Readiness... Timeout set: %s\n", podTemplateName, podName, cInfo.Name, readinessTimeout)
 
-	if err := helpers.WaitForContainerReadiness(runtime, containerID, readinessTimeout); err != nil {
+	if err := helpers.WaitForContainerReadiness(runtimeClient, containerID, readinessTimeout); err != nil {
 		return fmt.Errorf("readiness check failed for container: '%s'!: %w", cInfo.Name, err)
 	}
 	logger.Infof("'%s', '%s', '%s': Readiness Check for the container is completed!\n", podTemplateName, podName, cInfo.Name)
@@ -631,9 +631,9 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName
 	return nil
 }
 
-func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
+func deployPodAndReadinessCheck(runtimeClient runtime.Runtime, podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
-	pods, err := podman.RunPodmanKubePlay(body, opts)
+	pods, err := runtimeClient.CreatePod(body)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
@@ -647,7 +647,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 	*/
 
 	for _, pod := range pods {
-		pInfo, err := runtime.InspectPod(pod.ID)
+		pInfo, err := runtimeClient.InspectPod(pod.ID)
 		if err != nil {
 			return fmt.Errorf("failed to do pod inspect for podID: '%s' with error: %w", pod.ID, err)
 		}
@@ -657,13 +657,13 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 		logger.Infof("'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
 
 		// Step1: ---- Containers Creation Check ----
-		if err := doContainersCreationCheck(runtime, podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
+		if err := doContainersCreationCheck(runtimeClient, podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
 			return err
 		}
 
 		// Step2: ---- Containers Readiness Check ----
 		for _, container := range pInfo.Containers {
-			if err := doContainerReadinessCheck(runtime, podTemplateName, pInfo.Name, container.ID); err != nil {
+			if err := doContainerReadinessCheck(runtimeClient, podTemplateName, pInfo.Name, container.ID); err != nil {
 				return err
 			}
 			logger.Infoln("-------")
@@ -685,7 +685,7 @@ func validateSpyreCardRequirements(req int, actual int) error {
 	return nil
 }
 
-func calculateReqSpyreCards(client *podman.PodmanClient, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
+func calculateReqSpyreCards(client runtime.Runtime, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts
